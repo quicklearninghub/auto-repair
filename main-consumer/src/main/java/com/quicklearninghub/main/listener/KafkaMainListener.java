@@ -4,9 +4,9 @@ package com.quicklearninghub.main.listener;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quicklearninghub.database.dto.Account;
-import com.quicklearninghub.main.validator.AccountValidator;
 import com.quicklearninghub.database.entity.FailedMessageEntity;
 import com.quicklearninghub.database.repository.FailedMessageRepository;
+import com.quicklearninghub.main.validator.AccountValidator;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -44,40 +44,47 @@ public class KafkaMainListener {
         if(nonNull(consumerRecord.value())) {
             Account account =  objectMapper.readValue(consumerRecord.value(), Account.class);
             var errorCode = accountValidator.validate(account);
-            Long failedMessageId = getFailedMessageId(consumerRecord);
-            Optional<FailedMessageEntity> failedMessageEntityOptional = Optional.empty();
-            if(nonNull(failedMessageId)) {
-                failedMessageEntityOptional = failedMessageRepository.findById(failedMessageId);
-            }
-            if(failedMessageEntityOptional.isPresent()) {
-                if(isNull(errorCode)) {
-                    FailedMessageEntity failedMessageEntity = failedMessageEntityOptional.get();
-                    failedMessageEntity.setStatus("CLOSED");
-                    failedMessageRepository.save(failedMessageEntity);
-                }  else {
-                    log.error("Validation failed again: {}", errorCode);
-                }
-            } else {
-                saveFailedMessageEntity(consumerRecord, errorCode);
-            }
+
+            saveFailedMessageEntity(consumerRecord, errorCode);
         }
         log.info("Finished consuming message on topic: {}, offset {}, message {}", consumerRecord.topic(),
                 consumerRecord.offset(), consumerRecord.value());
     }
 
-    private void saveFailedMessageEntity(ConsumerRecord<String, String> consumerRecord, String errorCode) {
-        if(nonNull(errorCode)) {
-            log.error("Validation failed {}", errorCode);
-            FailedMessageEntity failedMessageEntity = new FailedMessageEntity();
-            failedMessageEntity.setMessage(consumerRecord.value());
-            failedMessageEntity.setStatus("OPEN");
-            failedMessageEntity.setErrorCode(errorCode);
-            failedMessageRepository.save(failedMessageEntity);
-            log.info("Successfully saved FailedMessageEntity to database: {}", failedMessageEntity);
+    public void saveFailedMessageEntity(ConsumerRecord<String, String> consumerRecord,
+                                         String errorCode) {
+        FailedMessageEntity failedMessageEntity;
+        var failedMessageEntityOptional = getFailedMessageEntity(consumerRecord);
+        if(failedMessageEntityOptional.isPresent()) {
+            failedMessageEntity = failedMessageEntityOptional.get();
+            if(isNull(errorCode)) {
+                log.info("Updating the failed message {}", failedMessageEntity.getId());
+                failedMessageEntity.setStatus("CLOSE");
+            } else {
+                log.warn("Validation failed again for failedMessage {}", failedMessageEntity.getId());
+            }
+        } else {
+            if(nonNull(errorCode)) {
+                failedMessageEntity = new FailedMessageEntity();
+                log.info("Validation failed {}", errorCode);
+                failedMessageEntity.setMessage(consumerRecord.value());
+                failedMessageEntity.setStatus("OPEN");
+                failedMessageEntity.setErrorCode(errorCode);
+                failedMessageRepository.save(failedMessageEntity);
+                log.info("Successfully saved FailedMessageEntity to database: {}", failedMessageEntity);
+            }
         }
     }
 
-    private static Long getFailedMessageId(ConsumerRecord<String, String> consumerRecord) {
+    private Optional<FailedMessageEntity> getFailedMessageEntity(ConsumerRecord<String, String> consumerRecord) {
+        Optional<Long> failedMessageIdOptional = getFailedMessageId(consumerRecord);
+        if(failedMessageIdOptional.isPresent()) {
+            log.info("Getting failedMessageEntity for id {}", failedMessageIdOptional.get());
+            return failedMessageRepository.findById(failedMessageIdOptional.get());
+        }
+        return Optional.empty();
+    }
+    private static Optional<Long> getFailedMessageId(ConsumerRecord<String, String> consumerRecord) {
         String failedMessageId = null;
         if(nonNull(consumerRecord.headers())) {
             Iterator<Header> headerIterator = consumerRecord.headers().iterator();
@@ -89,9 +96,9 @@ public class KafkaMainListener {
             }
         }
         if(nonNull(failedMessageId))
-            return Long.parseLong(failedMessageId);
+            return Optional.of(Long.parseLong(failedMessageId));
 
-        return null;
+        return Optional.empty();
     }
 }
 
