@@ -54,7 +54,8 @@ public class KafkaAutoRepairListener {
              // Logic to publish message back to main topic
                 associatedFailedMessages.forEach(failedMessageEntity -> {
                     try {
-                        publisherService.publish(mainTopic, objectMapper.writeValueAsString(objectMapper.readValue(failedMessageEntity.getMessage(), Account.class)), getHeaders(failedMessageEntity.getId().toString()));
+                        publisherService.publish(mainTopic, objectMapper.writeValueAsString(objectMapper.readValue(failedMessageEntity.getMessage(), Account.class)),
+                                getHeaders(failedMessageEntity.getId().toString()));
                     } catch (JsonProcessingException e) {
                         throw new RuntimeException(e);
                     }
